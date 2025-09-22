@@ -1,0 +1,43 @@
+{
+  "name": "electron-objproxy",
+  "version": "0.1.0",
+  "description": "An object proxying mechanism for Electron applications",
+  "keywords": [],
+  "homepage": "https://github.com/nak2k/electron-objproxy",
+  "bugs": {
+    "url": "https://github.com/nak2k/electron-objproxy/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nak2k/electron-objproxy.git"
+  },
+  "license": "MIT",
+  "author": "Kengo Nakatsuka <kengo.nakatsuka@gmail.com>",
+  "type": "module",
+  "files": [
+    "README.md",
+    "lib/"
+  ],
+  "exports": {
+    "./main": "./lib/main/index.js",
+    "./preload": "./lib/preload/index.cjs",
+    "./renderer": "./lib/renderer/index.js",
+    "./types": "./lib/common/types.js"
+  },
+  "scripts": {
+    "build:common": "tsc -p tsconfig.common.json",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "tsc -p tsconfig.renderer.json",
+    "build:preload": "tsup src/preload/index.ts --outDir lib/preload --format cjs --no-dts --platform node --target es2020 --sourcemap --clean --external electron,node:fs,node:path",
+    "build": "run-s clean build:common build:main build:renderer build:preload",
+    "clean": "rimraf lib *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "electron": "^38.1.2",
+    "npm-run-all": "^4.1.5",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  }
+}

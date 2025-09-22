@@ -1,0 +1,2 @@
+export const OBJECT_METADATA = Symbol('ELECTRON_OBJ_PROXY_METADATA');
+export const IPC_CHANNEL = '__ELECTRON_OBJ_PROXY__';
