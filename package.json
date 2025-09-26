@@ -1,6 +1,6 @@
 {
   "name": "electron-objproxy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "An object proxying mechanism for Electron applications",
   "keywords": [],
   "homepage": "https://github.com/nak2k/electron-objproxy",
