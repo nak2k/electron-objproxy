@@ -6,6 +6,10 @@ import { OBJECT_METADATA } from '../common/constants.js';
  */
 const api = (window as any).__electronObjProxy as ElectronObjProxyAPI;
 
+if (!api) {
+  throw new Error('ElectronObjProxyAPI is not available. initObjProxy() must be called in the main process.');
+}
+
 /**
  * Metadata interface for objects in the renderer process.
  */
