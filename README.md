@@ -36,8 +36,10 @@ import { MyClass, AnotherClass } from './my-classes';
 
 // Initialize the object proxy with your classes
 initObjProxy({
-  MyClass,
-  AnotherClass,
+  classMap: {
+    MyClass,
+    AnotherClass,
+  },
 });
 ```
 
