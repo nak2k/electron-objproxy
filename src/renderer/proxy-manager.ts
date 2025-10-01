@@ -35,27 +35,15 @@ const objectMap: Record<number, WeakRef<ObjectRenderer>> = {};
  */
 const singletonProxyMap: Record<string, ObjectRenderer> = {};
 
-
 /**
- * Creates a remote object instance in the main process and returns a proxy.
+ * Creates a proxy object from an IPC response containing objectId and isEventTarget.
+ * This is a helper function shared by createObject and getSingleton.
  *
- * @param className - The name of the class to instantiate
- * @param init - Constructor parameters for the class
- * @returns Promise that resolves to the created proxy object
+ * @param objectId - The unique identifier for the remote object
+ * @param isEventTarget - Whether the remote object is an EventTarget
+ * @returns The created proxy object
  */
-export async function createObject<
-  T extends keyof ClassMap,
-  A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
-  // Send object creation request to main process via preload API
-  const response = await api.invoke({
-    type: 'new',
-    className: className as string,
-    args: init,
-  });
-
-  const { objectId, isEventTarget } = response;
-
+function createProxyFromResponse(objectId: number, isEventTarget: boolean): ObjectRenderer {
   // Create base object based on whether it's an EventTarget
   const target: ObjectRenderer = isEventTarget ? new EventTarget() : {};
 
@@ -109,6 +97,32 @@ export async function createObject<
   // Register the proxy in objectMap using WeakRef
   objectMap[objectId] = new WeakRef(proxy);
 
+  return proxy;
+}
+
+/**
+ * Creates a remote object instance in the main process and returns a proxy.
+ *
+ * @param className - The name of the class to instantiate
+ * @param init - Constructor parameters for the class
+ * @returns Promise that resolves to the created proxy object
+ */
+export async function createObject<
+  T extends keyof ClassMap,
+  A extends ConstructorParameters<ClassMap[T]>
+>(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
+  // Send object creation request to main process via preload API
+  const response = await api.invoke({
+    type: 'new',
+    className: className as string,
+    args: init,
+  });
+
+  const { objectId, isEventTarget } = response;
+
+  // Create and register proxy object
+  const proxy = createProxyFromResponse(objectId, isEventTarget);
+
   return proxy as InstanceType<ClassMap[T]>;
 }
 
@@ -141,59 +155,11 @@ export async function getSingleton<
 
   const { objectId, isEventTarget } = response;
 
-  // Create base object based on whether it's an EventTarget
-  const target: ObjectRenderer = isEventTarget ? new EventTarget() : {};
+  // Create and register proxy object
+  const proxy = createProxyFromResponse(objectId, isEventTarget);
 
-  // Create metadata object
-  const metadata: ObjectMetadataRenderer = { objectId };
-
-  // Create method cache scoped to this proxy instance
-  const methodCache: Record<string, Function> = {};
-
-  // Create proxy with custom behavior
-  const proxy = new Proxy(target, {
-    get(target, prop, receiver) {
-      // Ignore 'then' property to avoid thenable assimilation
-      if (prop === 'then') {
-        return undefined;
-      }
-
-      // Return metadata for special symbol
-      if (prop === OBJECT_METADATA) {
-        return metadata;
-      }
-
-      // For string properties, check if they exist on target first
-      if (typeof prop === 'string') {
-        if (!methodCache[prop]) {
-          // Check if the property exists on the target object
-          const targetValue = Reflect.get(target, prop);
-          if (typeof targetValue === 'function') {
-            // If it's a function on the target, bind it to the target
-            methodCache[prop] = targetValue.bind(target);
-          } else {
-            // Otherwise, create a remote method call
-            methodCache[prop] = async function (...args: unknown[]) {
-              return api.invoke({
-                type: 'call',
-                objectId,
-                method: prop,
-                args,
-              });
-            };
-          }
-        }
-
-        return methodCache[prop];
-      }
-
-      return Reflect.get(target, prop, receiver);
-    },
-  });
-
-  // Register the proxy in both maps
+  // Also register in singleton map for caching
   singletonProxyMap[classNameStr] = proxy;
-  objectMap[objectId] = new WeakRef(proxy);
 
   return proxy as InstanceType<ClassMap[T]>;
 }
