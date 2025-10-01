@@ -45,14 +45,30 @@ initObjProxy({
 
 ### 3. Create Objects from Renderer Process
 
-In your renderer process, use `createObject` to create instances of the registered classes:
+You can create objects in two ways:
+
+**Regular objects** - Each call creates a new instance:
 
 ```typescript
 // renderer.ts
 import { createObject } from 'electron-objproxy/renderer';
 
-// Create an object instance remotely
+// Create a new object instance remotely
 const myObject = await createObject('MyClass', arg1, arg2);
+const another = await createObject('MyClass', arg1, arg2); // Different instance
+```
+
+**Singleton objects** - Returns the same instance across all calls:
+
+```typescript
+// renderer.ts
+import { getSingleton } from 'electron-objproxy/renderer';
+
+// Get or create a singleton instance
+const singleton = await getSingleton('MyClass', arg1, arg2);
+const same = await getSingleton('MyClass', arg1, arg2); // Same instance
+
+// Note: Constructor arguments are only used on first creation
 ```
 
 ### 4. Method Calls and Event Handling
