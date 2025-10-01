@@ -29,6 +29,12 @@ type ObjectRenderer = {} | EventTarget;
  */
 const objectMap: Record<number, WeakRef<ObjectRenderer>> = {};
 
+/**
+ * Map to manage singleton proxy objects with strong references.
+ * These proxies are never garbage collected until page reload.
+ */
+const singletonProxyMap: Record<string, ObjectRenderer> = {};
+
 
 /**
  * Creates a remote object instance in the main process and returns a proxy.
@@ -107,6 +113,92 @@ export async function createObject<
 }
 
 /**
+ * Gets or creates a singleton object instance in the main process and returns a proxy.
+ * If a singleton for the given class name already exists in the renderer process,
+ * returns the cached proxy. Otherwise, requests the singleton from the main process.
+ *
+ * @param className - The name of the class to instantiate
+ * @param init - Constructor parameters for the class (used only on first creation)
+ * @returns Promise that resolves to the singleton proxy object
+ */
+export async function getSingleton<
+  T extends keyof ClassMap,
+  A extends ConstructorParameters<ClassMap[T]>
+>(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
+  const classNameStr = className as string;
+
+  // Return cached singleton proxy if it exists
+  if (singletonProxyMap[classNameStr]) {
+    return singletonProxyMap[classNameStr] as InstanceType<ClassMap[T]>;
+  }
+
+  // Send singleton retrieval request to main process via preload API
+  const response = await api.invoke({
+    type: 'getSingleton',
+    className: classNameStr,
+    args: init,
+  });
+
+  const { objectId, isEventTarget } = response;
+
+  // Create base object based on whether it's an EventTarget
+  const target: ObjectRenderer = isEventTarget ? new EventTarget() : {};
+
+  // Create metadata object
+  const metadata: ObjectMetadataRenderer = { objectId };
+
+  // Create method cache scoped to this proxy instance
+  const methodCache: Record<string, Function> = {};
+
+  // Create proxy with custom behavior
+  const proxy = new Proxy(target, {
+    get(target, prop, receiver) {
+      // Ignore 'then' property to avoid thenable assimilation
+      if (prop === 'then') {
+        return undefined;
+      }
+
+      // Return metadata for special symbol
+      if (prop === OBJECT_METADATA) {
+        return metadata;
+      }
+
+      // For string properties, check if they exist on target first
+      if (typeof prop === 'string') {
+        if (!methodCache[prop]) {
+          // Check if the property exists on the target object
+          const targetValue = Reflect.get(target, prop);
+          if (typeof targetValue === 'function') {
+            // If it's a function on the target, bind it to the target
+            methodCache[prop] = targetValue.bind(target);
+          } else {
+            // Otherwise, create a remote method call
+            methodCache[prop] = async function (...args: unknown[]) {
+              return api.invoke({
+                type: 'call',
+                objectId,
+                method: prop,
+                args,
+              });
+            };
+          }
+        }
+
+        return methodCache[prop];
+      }
+
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
+  // Register the proxy in both maps
+  singletonProxyMap[classNameStr] = proxy;
+  objectMap[objectId] = new WeakRef(proxy);
+
+  return proxy as InstanceType<ClassMap[T]>;
+}
+
+/**
  * Dispatches an event to the corresponding proxy object.
  *
  * @param objectId - ID of the object that should receive the event
@@ -155,6 +247,7 @@ function releaseObjects(objectIds: number[]): void {
  * Performs cleanup of unreferenced objects from the objectMap.
  * This function is called periodically to clean up WeakRef entries
  * that have been garbage collected.
+ * Note: singletonProxyMap is not subject to cleanup.
  */
 function cleanupObjects(): void {
   const releasedObjectIds: number[] = [];

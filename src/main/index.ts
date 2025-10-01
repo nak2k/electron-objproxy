@@ -2,7 +2,7 @@ import { app, ipcMain, webContents, type WebContents } from 'electron';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import type { ClassMap, CreateObjectRequest, CallMethodRequest, ReleaseObjectsMessage } from '../common/types.js';
+import type { ClassMap, CreateObjectRequest, GetSingletonRequest, CallMethodRequest, ReleaseObjectsMessage } from '../common/types.js';
 import { IPC_CHANNEL } from '../common/constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +32,12 @@ interface ObjectMetadataMain {
 const objectMap: Record<number, object> = {};
 
 /**
+ * Map to store singleton objects by class name.
+ * Singletons are never released once created.
+ */
+const singletonMap: Record<string, number> = {};
+
+/**
  * Next object ID to be assigned.
  */
 let nextObjectId = 1;
@@ -51,12 +57,17 @@ const OBJECT_METADATA_SYMBOL = Symbol('ELECTRON_OBJ_PROXY_MAIN_METADATA');
  */
 async function handleInvokeRequest(
   event: Electron.IpcMainInvokeEvent,
-  payload: CreateObjectRequest | CallMethodRequest
+  payload: CreateObjectRequest | GetSingletonRequest | CallMethodRequest
 ): Promise<any> {
   switch (payload.type) {
     case 'new': {
       const { className, args } = payload;
       return handleObjectCreation(event.sender, className, args);
+    }
+
+    case 'getSingleton': {
+      const { className, args } = payload;
+      return handleGetSingleton(event.sender, className, args);
     }
 
     case 'call': {
@@ -119,6 +130,35 @@ function handleObjectCreation(
   }
 
   return { objectId, isEventTarget };
+}
+
+/**
+ * Gets or creates a singleton object instance.
+ * If a singleton for the given class already exists, returns its object ID.
+ * Otherwise, creates a new instance and registers it as a singleton.
+ */
+function handleGetSingleton(
+  sender: WebContents,
+  className: string,
+  args: unknown[]
+): { objectId: number; isEventTarget: boolean } {
+  // Check if singleton already exists
+  const existingObjectId = singletonMap[className];
+  if (existingObjectId !== undefined) {
+    const instance = objectMap[existingObjectId];
+    if (instance) {
+      const isEventTarget = instance instanceof EventTarget;
+      return { objectId: existingObjectId, isEventTarget };
+    }
+  }
+
+  // Singleton doesn't exist, create new instance
+  const result = handleObjectCreation(sender, className, args);
+
+  // Register as singleton
+  singletonMap[className] = result.objectId;
+
+  return result;
 }
 
 /**

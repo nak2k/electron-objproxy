@@ -31,6 +31,14 @@ export interface ElectronObjProxyAPI {
   invoke(payload: CreateObjectRequest): Promise<CreateObjectResponse>;
 
   /**
+   * Sends invoke request to main process for singleton retrieval.
+   *
+   * @param payload - Get singleton request payload
+   * @returns Promise that resolves to create object response
+   */
+  invoke(payload: GetSingletonRequest): Promise<CreateObjectResponse>;
+
+  /**
    * Sends invoke request to main process for method calls.
    *
    * @param payload - Call method request payload
@@ -68,6 +76,15 @@ export interface CreateObjectRequest {
 export interface CreateObjectResponse {
   objectId: number;
   isEventTarget: boolean;
+}
+
+/**
+ * Request payload for getting singleton objects from main process.
+ */
+export interface GetSingletonRequest {
+  type: 'getSingleton';
+  className: string;
+  args: unknown[];
 }
 
 /**
