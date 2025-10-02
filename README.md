@@ -62,19 +62,38 @@ const another = await createObject('MyClass', arg1, arg2); // Different instance
 
 ```typescript
 // renderer.ts
-import { getSingleton, getSingletonSync } from 'electron-objproxy/renderer';
+import { getSingleton, getSingletonSync, singleton } from 'electron-objproxy/renderer';
 
 // Get or create a singleton instance
-const singleton = await getSingleton('MyClass', arg1, arg2);
+const mySingleton = await getSingleton('MyClass', arg1, arg2);
 const same = await getSingleton('MyClass', arg1, arg2); // Same instance
 
 // Synchronous version (blocks renderer process - use only when necessary)
 const syncSingleton = getSingletonSync('MyClass', arg1, arg2);
 
+// Convenient property access (no arguments, synchronous)
+const logger = singleton.Logger;
+const config = singleton.Config;
+
 // Note: Constructor arguments are only used on first creation
 ```
 
-### 4. Method Calls and Event Handling
+### 4. Using Singletons in Main Process
+
+You can also access singletons directly in the main process:
+
+```typescript
+// main.ts
+import { singleton } from 'electron-objproxy/main';
+
+// Synchronous access to singleton
+const logger = singleton.Logger;
+logger.log('Hello from main process');
+
+// If accessed from renderer later, events will be forwarded automatically
+```
+
+### 5. Method Calls and Event Handling
 
 Once you have created an object, you can call its methods and listen to events:
 

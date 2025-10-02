@@ -56,3 +56,24 @@ export function getSingletonSync<
 >(className: T, init?: A): InstanceType<ClassMap[T]> {
   return getProxySingletonSync(className, init);
 }
+
+/**
+ * Singleton object proxy for convenient singleton access.
+ * Properties correspond to class names in ClassMap.
+ * Each property access returns the singleton instance for that class.
+ *
+ * @example
+ * // Get singleton instance (synchronous)
+ * const logger = singleton.Logger;
+ *
+ * // Type-safe access
+ * const config = singleton.Config;
+ */
+export const singleton = new Proxy({} as { readonly [K in keyof ClassMap]: InstanceType<ClassMap[K]> }, {
+  get(_target, prop: string | symbol) {
+    if (typeof prop === 'string') {
+      return getProxySingletonSync(prop as keyof ClassMap);
+    }
+    return undefined;
+  }
+});

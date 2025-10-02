@@ -154,6 +154,19 @@ function handleGetSingleton(
   if (existingObjectId !== undefined) {
     const instance = objectMap[existingObjectId];
     if (instance) {
+      const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain | undefined;
+
+      // If metadata doesn't exist, create it (case: created via singleton proxy)
+      if (!metadata) {
+        const newMetadata: ObjectMetadataMain = { objectId: existingObjectId, sender };
+        (instance as any)[OBJECT_METADATA_SYMBOL] = newMetadata;
+
+        // If EventTarget, override dispatchEvent now
+        if (instance instanceof EventTarget) {
+          overrideDispatchEvent(instance as EventTarget);
+        }
+      }
+
       const isEventTarget = instance instanceof EventTarget;
       return { objectId: existingObjectId, isEventTarget };
     }
@@ -231,6 +244,53 @@ function overrideDispatchEvent(eventTarget: EventTarget): void {
     return result;
   };
 }
+
+/**
+ * Singleton object proxy for convenient singleton access in main process.
+ * Properties correspond to class names in ClassMap.
+ * Each property access returns the singleton instance for that class.
+ *
+ * @example
+ * // Get singleton instance
+ * const logger = singleton.Logger;
+ *
+ * // Type-safe access
+ * const config = singleton.Config;
+ */
+export const singleton = new Proxy({} as { readonly [K in keyof ClassMap]: InstanceType<ClassMap[K]> }, {
+  get(_target, prop: string | symbol) {
+    if (typeof prop === 'string') {
+      const classNameStr = prop;
+
+      // Check if singleton already exists
+      const existingObjectId = singletonMap[classNameStr];
+      if (existingObjectId !== undefined) {
+        const instance = objectMap[existingObjectId];
+        if (instance) {
+          return instance;
+        }
+      }
+
+      // Create new singleton with empty args
+      const ClassConstructor = (registeredClassMap as Record<string, new (...args: any[]) => any>)[classNameStr];
+      if (!ClassConstructor) {
+        throw new Error(`Class '${classNameStr}' is not registered in classMap`);
+      }
+
+      const instance = new ClassConstructor();
+      const objectId = nextObjectId++;
+
+      // Store and register as singleton (metadata will be added later when accessed from renderer)
+      objectMap[objectId] = instance;
+      singletonMap[classNameStr] = objectId;
+
+      // Note: metadata and EventTarget override will be set when first accessed from renderer
+
+      return instance;
+    }
+    return undefined;
+  }
+});
 
 /**
  * Initializes the electron-objproxy system in the main process.
