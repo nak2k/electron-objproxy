@@ -8,13 +8,13 @@ import { createObject as createProxyObject, getSingleton as getProxySingleton, g
  * internally calling the proxy-manager's createObject function.
  *
  * @param className - The name of the class to instantiate, must be registered in ClassMap
- * @param init - Constructor parameters for the class
+ * @param init - Constructor parameters for the class (optional)
  * @returns Promise that resolves to the created proxy object
  */
 export async function createObject<
   T extends keyof ClassMap,
   A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
+>(className: T, init?: A): Promise<InstanceType<ClassMap[T]>> {
   return createProxyObject(className, init);
 }
 

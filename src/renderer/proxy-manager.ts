@@ -104,18 +104,18 @@ function createProxyFromResponse(objectId: number, isEventTarget: boolean): Obje
  * Creates a remote object instance in the main process and returns a proxy.
  *
  * @param className - The name of the class to instantiate
- * @param init - Constructor parameters for the class
+ * @param init - Constructor parameters for the class (optional)
  * @returns Promise that resolves to the created proxy object
  */
 export async function createObject<
   T extends keyof ClassMap,
   A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
+>(className: T, init?: A): Promise<InstanceType<ClassMap[T]>> {
   // Send object creation request to main process via preload API
   const response = await api.invoke({
     type: 'new',
     className: className as string,
-    args: init,
+    args: init ?? [],
   });
 
   const { objectId, isEventTarget } = response;
