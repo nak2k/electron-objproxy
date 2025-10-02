@@ -165,6 +165,44 @@ export async function getSingleton<
 }
 
 /**
+ * Gets or creates a singleton object instance synchronously in the main process and returns a proxy.
+ * If a singleton for the given class name already exists in the renderer process,
+ * returns the cached proxy. Otherwise, requests the singleton from the main process synchronously.
+ *
+ * @param className - The name of the class to instantiate
+ * @param init - Constructor parameters for the class (used only on first creation)
+ * @returns The singleton proxy object
+ */
+export function getSingletonSync<
+  T extends keyof ClassMap,
+  A extends ConstructorParameters<ClassMap[T]>
+>(className: T, init: A): InstanceType<ClassMap[T]> {
+  const classNameStr = className as string;
+
+  // Return cached singleton proxy if it exists
+  if (singletonProxyMap[classNameStr]) {
+    return singletonProxyMap[classNameStr] as InstanceType<ClassMap[T]>;
+  }
+
+  // Send synchronous singleton retrieval request to main process via preload API
+  const response = api.sendSync({
+    type: 'getSingletonSync',
+    className: classNameStr,
+    args: init,
+  });
+
+  const { objectId, isEventTarget } = response;
+
+  // Create and register proxy object
+  const proxy = createProxyFromResponse(objectId, isEventTarget);
+
+  // Also register in singleton map for caching
+  singletonProxyMap[classNameStr] = proxy;
+
+  return proxy as InstanceType<ClassMap[T]>;
+}
+
+/**
  * Dispatches an event to the corresponding proxy object.
  *
  * @param objectId - ID of the object that should receive the event

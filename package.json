@@ -30,7 +30,12 @@
     "build:renderer": "tsc -p tsconfig.renderer.json",
     "build:preload": "tsup src/preload/index.ts --outDir lib/preload --format cjs --no-dts --platform node --target es2020 --sourcemap --clean --external electron,node:fs,node:path",
     "build": "run-s clean build:common build:main build:renderer build:preload",
-    "clean": "rimraf lib *.tsbuildinfo"
+    "clean": "rimraf lib *.tsbuildinfo",
+    "typecheck": "run-s typecheck:*",
+    "typecheck:common": "tsc -p tsconfig.common.json --noEmit",
+    "typecheck:main": "tsc -p tsconfig.main.json --noEmit",
+    "typecheck:renderer": "tsc -p tsconfig.renderer.json --noEmit",
+    "typecheck:preload": "tsc -p tsconfig.preload.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",

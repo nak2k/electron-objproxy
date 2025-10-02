@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ElectronObjProxyAPI, CreateObjectRequest, CallMethodRequest, ReleaseObjectsMessage, EventMessage } from '../common/types.js';
+import type { ElectronObjProxyAPI, CreateObjectRequest, GetSingletonRequest, CallMethodRequest, ReleaseObjectsMessage, EventMessage, GetSingletonSyncRequest } from '../common/types.js';
 import { IPC_CHANNEL } from '../common/constants.js';
 
 /**
@@ -15,7 +15,7 @@ const electronObjProxyAPI: ElectronObjProxyAPI = {
   /**
    * Sends invoke request to main process.
    */
-  async invoke(payload: CreateObjectRequest | CallMethodRequest) {
+  async invoke(payload: CreateObjectRequest | GetSingletonRequest | CallMethodRequest) {
     return ipcRenderer.invoke(IPC_CHANNEL, payload);
   },
 
@@ -24,6 +24,13 @@ const electronObjProxyAPI: ElectronObjProxyAPI = {
    */
   send(message: ReleaseObjectsMessage) {
     ipcRenderer.send(IPC_CHANNEL, message);
+  },
+
+  /**
+   * Sends synchronous request to main process.
+   */
+  sendSync(message: GetSingletonSyncRequest) {
+    return ipcRenderer.sendSync(IPC_CHANNEL, message);
   },
 
   /**

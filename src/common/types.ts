@@ -54,6 +54,14 @@ export interface ElectronObjProxyAPI {
   send(message: ReleaseObjectsMessage): void;
 
   /**
+   * Sends synchronous request to main process for singleton retrieval.
+   *
+   * @param message - Get singleton sync request
+   * @returns Singleton sync response
+   */
+  sendSync(message: GetSingletonSyncRequest): GetSingletonSyncResponse;
+
+  /**
    * Registers listener for event notifications from main process.
    *
    * @param listener - Function to handle event messages
@@ -113,4 +121,21 @@ export interface EventMessage {
   objectId: number;
   eventType: string;
   detail: unknown;
+}
+
+/**
+ * Request payload for getting singleton objects synchronously from main process.
+ */
+export interface GetSingletonSyncRequest {
+  type: 'getSingletonSync';
+  className: string;
+  args: unknown[];
+}
+
+/**
+ * Response payload for synchronous singleton retrieval.
+ */
+export interface GetSingletonSyncResponse {
+  objectId: number;
+  isEventTarget: boolean;
 }

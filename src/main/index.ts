@@ -2,7 +2,7 @@ import { app, ipcMain, webContents, type WebContents } from 'electron';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import type { ClassMap, CreateObjectRequest, GetSingletonRequest, CallMethodRequest, ReleaseObjectsMessage } from '../common/types.js';
+import type { ClassMap, CreateObjectRequest, GetSingletonRequest, GetSingletonSyncRequest, CallMethodRequest, ReleaseObjectsMessage } from '../common/types.js';
 import { IPC_CHANNEL } from '../common/constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -84,13 +84,20 @@ async function handleInvokeRequest(
  * Handles IPC send requests from renderer processes.
  */
 function handleSendRequest(
-  _event: Electron.IpcMainEvent,
-  message: ReleaseObjectsMessage
+  event: Electron.IpcMainEvent,
+  message: ReleaseObjectsMessage | GetSingletonSyncRequest
 ): void {
   switch (message.type) {
     case 'release': {
       const { objectIds } = message;
       handleObjectRelease(objectIds);
+      break;
+    }
+
+    case 'getSingletonSync': {
+      const { className, args } = message;
+      const result = handleGetSingleton(event.sender, className, args);
+      event.returnValue = result;
       break;
     }
 

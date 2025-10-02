@@ -62,11 +62,14 @@ const another = await createObject('MyClass', arg1, arg2); // Different instance
 
 ```typescript
 // renderer.ts
-import { getSingleton } from 'electron-objproxy/renderer';
+import { getSingleton, getSingletonSync } from 'electron-objproxy/renderer';
 
 // Get or create a singleton instance
 const singleton = await getSingleton('MyClass', arg1, arg2);
 const same = await getSingleton('MyClass', arg1, arg2); // Same instance
+
+// Synchronous version (blocks renderer process - use only when necessary)
+const syncSingleton = getSingletonSync('MyClass', arg1, arg2);
 
 // Note: Constructor arguments are only used on first creation
 ```
