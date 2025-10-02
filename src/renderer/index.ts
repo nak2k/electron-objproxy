@@ -26,13 +26,13 @@ export async function createObject<
  * Always returns the same instance for a given class name.
  *
  * @param className - The name of the class to instantiate, must be registered in ClassMap
- * @param init - Constructor parameters for the class (used only on first creation)
+ * @param init - Constructor parameters for the class (optional, used only on first creation)
  * @returns Promise that resolves to the singleton proxy object
  */
 export async function getSingleton<
   T extends keyof ClassMap,
   A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
+>(className: T, init?: A): Promise<InstanceType<ClassMap[T]>> {
   return getProxySingleton(className, init);
 }
 
@@ -47,12 +47,12 @@ export async function getSingleton<
  * Use this function only when necessary, such as during initialization.
  *
  * @param className - The name of the class to instantiate, must be registered in ClassMap
- * @param init - Constructor parameters for the class (used only on first creation)
+ * @param init - Constructor parameters for the class (optional, used only on first creation)
  * @returns The singleton proxy object
  */
 export function getSingletonSync<
   T extends keyof ClassMap,
   A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): InstanceType<ClassMap[T]> {
+>(className: T, init?: A): InstanceType<ClassMap[T]> {
   return getProxySingletonSync(className, init);
 }

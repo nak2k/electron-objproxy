@@ -132,13 +132,13 @@ export async function createObject<
  * returns the cached proxy. Otherwise, requests the singleton from the main process.
  *
  * @param className - The name of the class to instantiate
- * @param init - Constructor parameters for the class (used only on first creation)
+ * @param init - Constructor parameters for the class (optional, used only on first creation)
  * @returns Promise that resolves to the singleton proxy object
  */
 export async function getSingleton<
   T extends keyof ClassMap,
   A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): Promise<InstanceType<ClassMap[T]>> {
+>(className: T, init?: A): Promise<InstanceType<ClassMap[T]>> {
   const classNameStr = className as string;
 
   // Return cached singleton proxy if it exists
@@ -150,7 +150,7 @@ export async function getSingleton<
   const response = await api.invoke({
     type: 'getSingleton',
     className: classNameStr,
-    args: init,
+    args: init ?? [],
   });
 
   const { objectId, isEventTarget } = response;
@@ -170,13 +170,13 @@ export async function getSingleton<
  * returns the cached proxy. Otherwise, requests the singleton from the main process synchronously.
  *
  * @param className - The name of the class to instantiate
- * @param init - Constructor parameters for the class (used only on first creation)
+ * @param init - Constructor parameters for the class (optional, used only on first creation)
  * @returns The singleton proxy object
  */
 export function getSingletonSync<
   T extends keyof ClassMap,
   A extends ConstructorParameters<ClassMap[T]>
->(className: T, init: A): InstanceType<ClassMap[T]> {
+>(className: T, init?: A): InstanceType<ClassMap[T]> {
   const classNameStr = className as string;
 
   // Return cached singleton proxy if it exists
@@ -188,7 +188,7 @@ export function getSingletonSync<
   const response = api.sendSync({
     type: 'getSingletonSync',
     className: classNameStr,
-    args: init,
+    args: init ?? [],
   });
 
   const { objectId, isEventTarget } = response;
