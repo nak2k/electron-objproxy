@@ -246,6 +246,12 @@ function overrideDispatchEvent(eventTarget: EventTarget): void {
 }
 
 /**
+ * Type for singleton object that provides convenient access to singleton instances.
+ * Properties correspond to class names in ClassMap.
+ */
+export type SingletonObject = { readonly [K in keyof ClassMap]: InstanceType<ClassMap[K]> };
+
+/**
  * Singleton object proxy for convenient singleton access in main process.
  * Properties correspond to class names in ClassMap.
  * Each property access returns the singleton instance for that class.
@@ -257,7 +263,7 @@ function overrideDispatchEvent(eventTarget: EventTarget): void {
  * // Type-safe access
  * const config = singleton.Config;
  */
-export const singleton = new Proxy({} as { readonly [K in keyof ClassMap]: InstanceType<ClassMap[K]> }, {
+export const singleton: SingletonObject = new Proxy({} as SingletonObject, {
   get(_target, prop: string | symbol) {
     if (typeof prop === 'string') {
       const classNameStr = prop;
