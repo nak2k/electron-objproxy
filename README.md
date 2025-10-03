@@ -54,8 +54,11 @@ You can create objects in two ways:
 import { createObject } from 'electron-objproxy/renderer';
 
 // Create a new object instance remotely
-const myObject = await createObject('MyClass', arg1, arg2);
-const another = await createObject('MyClass', arg1, arg2); // Different instance
+const myObject = await createObject('MyClass', [arg1, arg2]);
+const another = await createObject('MyClass', [arg1, arg2]); // Different instance
+
+// Without constructor arguments
+const simple = await createObject('SimpleClass');
 ```
 
 **Singleton objects** - Returns the same instance across all calls:
@@ -65,11 +68,11 @@ const another = await createObject('MyClass', arg1, arg2); // Different instance
 import { getSingleton, getSingletonSync, singleton } from 'electron-objproxy/renderer';
 
 // Get or create a singleton instance
-const mySingleton = await getSingleton('MyClass', arg1, arg2);
-const same = await getSingleton('MyClass', arg1, arg2); // Same instance
+const mySingleton = await getSingleton('MyClass', [arg1, arg2]);
+const same = await getSingleton('MyClass'); // Same instance (args ignored after first creation)
 
 // Synchronous version (blocks renderer process - use only when necessary)
-const syncSingleton = getSingletonSync('MyClass', arg1, arg2);
+const syncSingleton = getSingletonSync('MyClass', [arg1, arg2]);
 
 // Convenient property access (no arguments, synchronous)
 const logger = singleton.Logger;
