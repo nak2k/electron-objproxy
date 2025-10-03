@@ -107,6 +107,16 @@ myObject.addEventListener('custom-event', (event) => {
 });
 ```
 
+## Limitations
+
+- One-way proxying only: Objects can only be created in the main process and proxied to renderer processes, not vice versa
+- Async methods only: All method calls are asynchronous and must be awaited in the renderer process
+- JSON-serializable arguments only: Method arguments and return values must be JSON-serializable (IPC limitation)
+- No property access: Only method calls are supported; property get/set operations require IPC calls which aren't implemented
+- EventTarget events only: Event forwarding is only available for objects extending `EventTarget`
+- Singleton lifecycle: Singleton objects are never released once created until the application exits
+- Context isolation required: Only works with `contextIsolation: true` in Electron's webPreferences
+
 ## License
 
 MIT License
