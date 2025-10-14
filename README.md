@@ -120,6 +120,10 @@ myObject.addEventListener('custom-event', (event) => {
 - Singleton lifecycle: Singleton objects are never released once created until the application exits
 - Context isolation required: Only works with `contextIsolation: true` in Electron's webPreferences
 
+## Related
+
+- [electron-nopreload](https://github.com/nak2k/electron-nopreload) - Expose Electron Renderer Process APIs to Main World with security hooks
+
 ## License
 
 MIT License
