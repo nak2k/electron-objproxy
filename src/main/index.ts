@@ -2,8 +2,11 @@ import { app, ipcMain, webContents, type WebContents } from 'electron';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import type { ClassMap, CreateObjectRequest, GetSingletonRequest, GetSingletonSyncRequest, CallMethodRequest, ReleaseObjectsMessage } from '../common/types.js';
-import { IPC_CHANNEL } from '../common/constants.js';
+import type { ClassMap, CreateObjectRequest, GetSingletonRequest, GetSingletonSyncRequest, CallMethodRequest, ReleaseObjectsMessage, CallWithPortMessage, ExtensionMetadata } from '../common/types.js';
+import { IPC_CHANNEL, EXTENSION_METADATA } from '../common/constants.js';
+
+export { EXTENSION_METADATA } from '../common/constants.js';
+export type { ExtensionMetadata } from '../common/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -85,7 +88,7 @@ async function handleInvokeRequest(
  */
 function handleSendRequest(
   event: Electron.IpcMainEvent,
-  message: ReleaseObjectsMessage | GetSingletonSyncRequest
+  message: ReleaseObjectsMessage | GetSingletonSyncRequest | CallWithPortMessage
 ): void {
   switch (message.type) {
     case 'release': {
@@ -101,6 +104,12 @@ function handleSendRequest(
       break;
     }
 
+    case 'callWithPort': {
+      const { objectId, method, args } = message;
+      handleMethodCallWithPort(objectId, method, args, event.ports);
+      break;
+    }
+
     default:
       console.warn(`Unknown send request type: ${(message as any).type}`);
   }
@@ -113,7 +122,7 @@ function handleObjectCreation(
   sender: WebContents,
   className: string,
   args: unknown[]
-): { objectId: number; isEventTarget: boolean } {
+): { objectId: number; isEventTarget: boolean; extensions?: ExtensionMetadata } {
   const ClassConstructor = (registeredClassMap as Record<string, new (...args: any[]) => any>)[className];
   if (!ClassConstructor) {
     throw new Error(`Class '${className}' is not registered in classMap`);
@@ -136,7 +145,10 @@ function handleObjectCreation(
     overrideDispatchEvent(instance as EventTarget);
   }
 
-  return { objectId, isEventTarget };
+  // Read extension metadata from class static property
+  const extensions = (ClassConstructor as any)[EXTENSION_METADATA] as ExtensionMetadata | undefined;
+
+  return { objectId, isEventTarget, extensions };
 }
 
 /**
@@ -148,7 +160,7 @@ function handleGetSingleton(
   sender: WebContents,
   className: string,
   args: unknown[]
-): { objectId: number; isEventTarget: boolean } {
+): { objectId: number; isEventTarget: boolean; extensions?: ExtensionMetadata } {
   // Check if singleton already exists
   const existingObjectId = singletonMap[className];
   if (existingObjectId !== undefined) {
@@ -168,7 +180,12 @@ function handleGetSingleton(
       }
 
       const isEventTarget = instance instanceof EventTarget;
-      return { objectId: existingObjectId, isEventTarget };
+
+      // Read extension metadata from class
+      const ClassConstructor = (registeredClassMap as Record<string, any>)[className];
+      const extensions = (ClassConstructor as any)?.[EXTENSION_METADATA] as ExtensionMetadata | undefined;
+
+      return { objectId: existingObjectId, isEventTarget, extensions };
     }
   }
 
@@ -201,6 +218,32 @@ async function handleMethodCall(
 
   // Call the method and return the result
   return methodFn.apply(instance, args);
+}
+
+/**
+ * Handles method calls with MessagePort transfer (fire-and-forget).
+ * Ports are passed as the last argument to the method as MessagePortMain[].
+ */
+function handleMethodCallWithPort(
+  objectId: number,
+  method: string,
+  args: unknown[],
+  ports: Electron.MessagePortMain[]
+): void {
+  const instance = objectMap[objectId];
+  if (!instance) {
+    console.warn(`Object with ID ${objectId} not found for callWithPort`);
+    return;
+  }
+
+  const methodFn = (instance as any)[method];
+  if (typeof methodFn !== 'function') {
+    console.warn(`Method '${method}' not found on object with ID ${objectId}`);
+    return;
+  }
+
+  // Call the method with args + ports as last argument
+  methodFn.apply(instance, [...args, ports]);
 }
 
 /**

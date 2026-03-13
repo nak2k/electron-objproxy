@@ -20,6 +20,7 @@
   ],
   "exports": {
     "./main": "./lib/main/index.js",
+    "./main/globals": "./lib/main/globals.d.ts",
     "./preload": "./lib/preload/index.cjs",
     "./renderer": "./lib/renderer/index.js",
     "./types": "./lib/common/types.js"
@@ -29,7 +30,8 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "tsc -p tsconfig.renderer.json",
     "build:preload": "tsup src/preload/index.ts --outDir lib/preload --format cjs --no-dts --platform node --target es2020 --sourcemap --clean --external electron,node:fs,node:path",
-    "build": "run-s clean build:common build:main build:renderer build:preload",
+    "build:copy-globals": "cp src/main/globals.d.ts lib/main/globals.d.ts",
+    "build": "run-s clean build:common build:main build:renderer build:preload build:copy-globals",
     "clean": "rimraf lib *.tsbuildinfo",
     "typecheck": "run-s typecheck:*",
     "typecheck:common": "tsc -p tsconfig.common.json --noEmit",

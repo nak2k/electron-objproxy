@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ElectronObjProxyAPI, CreateObjectRequest, GetSingletonRequest, CallMethodRequest, ReleaseObjectsMessage, EventMessage, GetSingletonSyncRequest } from '../common/types.js';
+import type { ElectronObjProxyAPI, CreateObjectRequest, GetSingletonRequest, CallMethodRequest, ReleaseObjectsMessage, EventMessage, GetSingletonSyncRequest, CallWithPortMessage } from '../common/types.js';
 import { IPC_CHANNEL } from '../common/constants.js';
 
 /**
@@ -55,6 +55,17 @@ function handleMainProcessEvent(_event: Electron.IpcRendererEvent, message: any)
 
 // Register event listener for main process events
 ipcRenderer.on(IPC_CHANNEL, handleMainProcessEvent);
+
+/**
+ * Handles MessagePort transfer from renderer via window.postMessage.
+ * Renderer sends { channel, message } with ports via window.postMessage,
+ * and preload forwards them to main process via ipcRenderer.postMessage.
+ */
+window.addEventListener('message', (event) => {
+  if (event.data?.channel === IPC_CHANNEL && event.ports.length > 0) {
+    ipcRenderer.postMessage(IPC_CHANNEL, event.data.message, event.ports);
+  }
+});
 
 // Expose the API to the renderer process through contextBridge
 if (process.contextIsolated) {

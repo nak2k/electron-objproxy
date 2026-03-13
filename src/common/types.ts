@@ -84,6 +84,7 @@ export interface CreateObjectRequest {
 export interface CreateObjectResponse {
   objectId: number;
   isEventTarget: boolean;
+  extensions?: ExtensionMetadata;
 }
 
 /**
@@ -138,4 +139,35 @@ export interface GetSingletonSyncRequest {
 export interface GetSingletonSyncResponse {
   objectId: number;
   isEventTarget: boolean;
+  extensions?: ExtensionMetadata;
+}
+
+/**
+ * Extension metadata that enables additional features for proxied objects.
+ * Set as a static property on classes using the EXTENSION_METADATA symbol.
+ */
+export interface ExtensionMetadata {
+  /** MessagePort transfer support configuration */
+  messagePort?: MessagePortExtension;
+}
+
+/**
+ * Configuration for MessagePort transfer support.
+ */
+export interface MessagePortExtension {
+  /** Method names that accept MessagePort transfers */
+  methods: string[];
+}
+
+/**
+ * Message payload for method calls with MessagePort transfer.
+ */
+export interface CallWithPortMessage {
+  type: 'callWithPort';
+  /** Target object ID */
+  objectId: number;
+  /** Method name to call */
+  method: string;
+  /** Method arguments (excluding MessagePort) */
+  args: unknown[];
 }

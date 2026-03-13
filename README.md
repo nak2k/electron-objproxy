@@ -110,6 +110,68 @@ myObject.addEventListener('custom-event', (event) => {
 });
 ```
 
+### 6. MessagePort Transfer
+
+You can transfer `MessagePort` instances from the renderer to the main process for direct communication channels. Methods that accept MessagePort transfers are declared via extension metadata and operate as fire-and-forget (no return value).
+
+**Main process class definition:**
+
+```typescript
+// my-service.ts
+import { EXTENSION_METADATA, type ExtensionMetadata } from 'electron-objproxy/main';
+
+class MyService {
+  static [EXTENSION_METADATA]: ExtensionMetadata = {
+    messagePort: {
+      methods: ['connect'],
+    },
+  };
+
+  connect(name: string, ports: MessagePort[]): void {
+    const port = ports[0];
+    port.start();
+    port.on('message', (event) => {
+      console.log(`[${name}] received:`, event.data);
+    });
+    port.postMessage('connected');
+  }
+
+  getStatus(): string {
+    return 'running';
+  }
+}
+```
+
+Note: In the main process, `MessagePort` resolves to Electron's `MessagePortMain`. Add the following triple-slash reference to a `.d.ts` file in your main process source:
+
+```typescript
+// src/main/env.d.ts
+/// <reference types="electron-objproxy/main/globals" />
+```
+
+**Renderer usage:**
+
+```typescript
+import { createObject } from 'electron-objproxy/renderer';
+
+const service = await createObject('MyService');
+
+// Create a MessageChannel for bidirectional communication
+const channel = new MessageChannel();
+
+// Transfer port1 to main process (fire-and-forget, no return value)
+service.connect('renderer', [channel.port1]);
+
+// Use port2 locally
+channel.port2.start();
+channel.port2.onmessage = (event) => {
+  console.log('From main:', event.data);
+};
+
+// Regular methods still work as usual
+const status = await service.getStatus();
+```
+
 ## Limitations
 
 - One-way proxying only: Objects can only be created in the main process and proxied to renderer processes, not vice versa
@@ -119,6 +181,7 @@ myObject.addEventListener('custom-event', (event) => {
 - EventTarget events only: Event forwarding is only available for objects extending `EventTarget`
 - Singleton lifecycle: Singleton objects are never released once created until the application exits
 - Context isolation required: Only works with `contextIsolation: true` in Electron's webPreferences
+- MessagePort transfer: Only supports renderer → main direction; methods declared for MessagePort are fire-and-forget (no return value)
 
 ## Related
 

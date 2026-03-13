@@ -1,5 +1,5 @@
-import type { ClassMap, ElectronObjProxyAPI } from '../common/types.js';
-import { OBJECT_METADATA } from '../common/constants.js';
+import type { ClassMap, ElectronObjProxyAPI, ExtensionMetadata } from '../common/types.js';
+import { OBJECT_METADATA, IPC_CHANNEL } from '../common/constants.js';
 
 /**
  * Access to the ElectronObjProxyAPI provided by the preload script.
@@ -41,9 +41,10 @@ const singletonProxyMap: Record<string, ObjectRenderer> = {};
  *
  * @param objectId - The unique identifier for the remote object
  * @param isEventTarget - Whether the remote object is an EventTarget
+ * @param extensions - Optional extension metadata for additional features
  * @returns The created proxy object
  */
-function createProxyFromResponse(objectId: number, isEventTarget: boolean): ObjectRenderer {
+function createProxyFromResponse(objectId: number, isEventTarget: boolean, extensions?: ExtensionMetadata): ObjectRenderer {
   // Create base object based on whether it's an EventTarget
   const target: ObjectRenderer = isEventTarget ? new EventTarget() : {};
 
@@ -52,6 +53,9 @@ function createProxyFromResponse(objectId: number, isEventTarget: boolean): Obje
 
   // Create method cache scoped to this proxy instance
   const methodCache: Record<string, Function> = {};
+
+  // Build a set of messagePort methods for fast lookup
+  const messagePortMethods = new Set(extensions?.messagePort?.methods);
 
   // Create proxy with custom behavior
   const proxy = new Proxy(target, {
@@ -74,6 +78,26 @@ function createProxyFromResponse(objectId: number, isEventTarget: boolean): Obje
           if (typeof targetValue === 'function') {
             // If it's a function on the target, bind it to the target
             methodCache[prop] = targetValue.bind(target);
+          } else if (messagePortMethods.has(prop)) {
+            // MessagePort method: fire-and-forget via postMessage
+            methodCache[prop] = function (...args: unknown[]) {
+              // Check if the last argument is a MessagePort array
+              let ports: MessagePort[] = [];
+              const lastArg = args[args.length - 1];
+              if (Array.isArray(lastArg) && lastArg.length > 0 && lastArg[0] instanceof MessagePort) {
+                ports = args.pop() as MessagePort[];
+              }
+
+              window.postMessage({
+                channel: IPC_CHANNEL,
+                message: {
+                  type: 'callWithPort',
+                  objectId,
+                  method: prop,
+                  args,
+                },
+              }, '*', ports);
+            };
           } else {
             // Otherwise, create a remote method call
             methodCache[prop] = async function (...args: unknown[]) {
@@ -118,10 +142,10 @@ export async function createObject<
     args: init ?? [],
   });
 
-  const { objectId, isEventTarget } = response;
+  const { objectId, isEventTarget, extensions } = response;
 
   // Create and register proxy object
-  const proxy = createProxyFromResponse(objectId, isEventTarget);
+  const proxy = createProxyFromResponse(objectId, isEventTarget, extensions);
 
   return proxy as InstanceType<ClassMap[T]>;
 }
@@ -153,10 +177,10 @@ export async function getSingleton<
     args: init ?? [],
   });
 
-  const { objectId, isEventTarget } = response;
+  const { objectId, isEventTarget, extensions } = response;
 
   // Create and register proxy object
-  const proxy = createProxyFromResponse(objectId, isEventTarget);
+  const proxy = createProxyFromResponse(objectId, isEventTarget, extensions);
 
   // Also register in singleton map for caching
   singletonProxyMap[classNameStr] = proxy;
@@ -191,10 +215,10 @@ export function getSingletonSync<
     args: init ?? [],
   });
 
-  const { objectId, isEventTarget } = response;
+  const { objectId, isEventTarget, extensions } = response;
 
   // Create and register proxy object
-  const proxy = createProxyFromResponse(objectId, isEventTarget);
+  const proxy = createProxyFromResponse(objectId, isEventTarget, extensions);
 
   // Also register in singleton map for caching
   singletonProxyMap[classNameStr] = proxy;
