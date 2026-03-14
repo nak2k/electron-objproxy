@@ -160,6 +160,21 @@ export interface MessagePortExtension {
 }
 
 /**
+ * Common interface for MessagePort that works in both Main and Renderer processes.
+ * In Main Process, the actual runtime type is MessagePortMain.
+ * In Renderer Process, the actual runtime type is MessagePort (DOM).
+ * Use this in method signatures for classes registered in ClassMap.
+ */
+export interface TransferablePort {
+  /** Sends a message through the port */
+  postMessage(message: any, transfer?: any[]): void;
+  /** Closes the port */
+  close(): void;
+  /** Starts receiving messages */
+  start(): void;
+}
+
+/**
  * Message payload for method calls with MessagePort transfer.
  */
 export interface CallWithPortMessage {

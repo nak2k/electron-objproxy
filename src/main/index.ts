@@ -6,7 +6,7 @@ import type { ClassMap, CreateObjectRequest, GetSingletonRequest, GetSingletonSy
 import { IPC_CHANNEL, EXTENSION_METADATA } from '../common/constants.js';
 
 export { EXTENSION_METADATA } from '../common/constants.js';
-export type { ExtensionMetadata } from '../common/types.js';
+export type { ExtensionMetadata, TransferablePort } from '../common/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

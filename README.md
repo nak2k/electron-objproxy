@@ -118,7 +118,8 @@ You can transfer `MessagePort` instances from the renderer to the main process f
 
 ```typescript
 // my-service.ts
-import { EXTENSION_METADATA, type ExtensionMetadata } from 'electron-objproxy/main';
+import type { MessagePortMain } from 'electron';
+import { EXTENSION_METADATA, type ExtensionMetadata, type TransferablePort } from 'electron-objproxy/main';
 
 class MyService {
   static [EXTENSION_METADATA]: ExtensionMetadata = {
@@ -127,8 +128,8 @@ class MyService {
     },
   };
 
-  connect(name: string, ports: MessagePort[]): void {
-    const port = ports[0];
+  connect(name: string, ports: TransferablePort[]): void {
+    const port = ports[0] as unknown as MessagePortMain;
     port.start();
     port.on('message', (event) => {
       console.log(`[${name}] received:`, event.data);
@@ -142,12 +143,7 @@ class MyService {
 }
 ```
 
-Note: In the main process, `MessagePort` resolves to Electron's `MessagePortMain`. Add the following triple-slash reference to a `.d.ts` file in your main process source:
-
-```typescript
-// src/main/env.d.ts
-/// <reference types="electron-objproxy/main/globals" />
-```
+Note: Method parameters use `TransferablePort[]` — a common interface that abstracts over Electron's `MessagePortMain` (main process) and the DOM `MessagePort` (renderer process). In the main process implementation, cast to `MessagePortMain` when you need Electron-specific APIs like `port.on('message', ...)`.
 
 **Renderer usage:**
 
