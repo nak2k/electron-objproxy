@@ -256,6 +256,34 @@ function handleObjectRelease(objectIds: number[]): void {
 }
 
 /**
+ * Releases all non-singleton objects whose sender matches the given WebContents.
+ * Invoked when a WebContents is destroyed (e.g., window closed).
+ */
+function releaseObjectsForWebContents(wc: WebContents): void {
+  const singletonIds = new Set(Object.values(singletonMap));
+  for (const key of Object.keys(objectMap)) {
+    const objectId = Number(key);
+    if (singletonIds.has(objectId)) {
+      continue;
+    }
+    const instance = objectMap[objectId];
+    const metadata = (instance as any)?.[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain | undefined;
+    if (metadata && metadata.sender === wc) {
+      delete objectMap[objectId];
+    }
+  }
+}
+
+/**
+ * Registers a destroyed listener on a WebContents to auto-release its objects.
+ */
+function watchWebContents(wc: WebContents): void {
+  wc.once('destroyed', () => {
+    releaseObjectsForWebContents(wc);
+  });
+}
+
+/**
  * Overrides the dispatchEvent method of an EventTarget to forward events to renderer.
  */
 function overrideDispatchEvent(eventTarget: EventTarget): void {
@@ -342,6 +370,21 @@ export const singleton: SingletonObject = new Proxy({} as SingletonObject, {
 });
 
 /**
+ * Internal testing helpers. Not part of the public API.
+ * Exposed for E2E tests that need to observe main-process state.
+ */
+export const __testing__ = {
+  /** Returns the list of currently managed object IDs. */
+  getManagedObjectIds(): number[] {
+    return Object.keys(objectMap).map(Number);
+  },
+  /** Returns the list of object IDs registered as singletons. */
+  getSingletonObjectIds(): number[] {
+    return Object.values(singletonMap);
+  },
+};
+
+/**
  * Initializes the electron-objproxy system in the main process.
  *
  * @param options - Configuration options including the class map
@@ -364,6 +407,11 @@ export async function initObjProxy(options: InitObjProxyOptions): Promise<void> 
     });
   });
 
+  // Auto-release objects when their owning WebContents is destroyed
+  app.on('web-contents-created', (_event, wc) => {
+    watchWebContents(wc);
+  });
+
   // Handle sessions for existing webContents
   const allWebContents = webContents.getAllWebContents();
   for (const wc of allWebContents) {
@@ -374,5 +422,6 @@ export async function initObjProxy(options: InitObjProxyOptions): Promise<void> 
         type: 'frame',
       });
     }
+    watchWebContents(wc);
   }
 }
