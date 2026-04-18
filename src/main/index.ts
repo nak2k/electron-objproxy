@@ -20,18 +20,36 @@ export interface InitObjProxyOptions {
 }
 
 /**
- * Metadata interface for objects in the main process.
+ * Metadata for a non-singleton (owned) object in the main process.
+ * The `owner` is the WebContents that requested the creation. It also serves as the
+ * single event-forwarding target and as the lifecycle owner — the object is auto-released
+ * when this WebContents is destroyed.
  */
-interface ObjectMetadataMain {
+interface OwnedObjectMetadataMain {
   /** Unique identifier for the object */
   objectId: number;
-  /**
-   * Set of WebContents to forward events to.
-   * For non-singleton objects this contains exactly one entry (the creator and lifecycle owner).
-   * For singleton objects this accumulates every WebContents that has obtained the singleton.
-   */
-  senders: Set<WebContents>;
+  /** Lifecycle owner. The object is auto-released when this WebContents is destroyed. */
+  owner: WebContents;
 }
+
+/**
+ * Metadata for a singleton object in the main process.
+ * `subscribers` is the set of WebContents that have obtained the singleton via getSingleton.
+ * Events dispatched on the singleton are broadcast to every subscriber. There is no
+ * lifecycle-owner concept: singletons live until the application exits.
+ */
+interface SingletonObjectMetadataMain {
+  /** Unique identifier for the object */
+  objectId: number;
+  /** WebContents subscribed to this singleton's events. */
+  subscribers: Set<WebContents>;
+}
+
+/**
+ * Discriminated union of metadata for objects managed by the main process.
+ * Use the `owner` / `subscribers` field presence to discriminate.
+ */
+type ObjectMetadataMain = OwnedObjectMetadataMain | SingletonObjectMetadataMain;
 
 /**
  * Map to store objects managed by the main process.
@@ -120,63 +138,70 @@ function handleSendRequest(
 }
 
 /**
- * Creates a new object instance and manages it.
+ * Instantiates a registered class and stores it in objectMap with a fresh objectId.
+ * The caller is responsible for attaching the appropriate ObjectMetadataMain variant
+ * and calling overrideDispatchEvent when the instance is an EventTarget.
+ */
+function instantiateRegisteredClass(
+  className: string,
+  args: unknown[]
+): { objectId: number; instance: object; isEventTarget: boolean; extensions?: ExtensionMetadata } {
+  const ClassConstructor = (registeredClassMap as Record<string, new (...args: any[]) => any>)[className];
+  if (!ClassConstructor) {
+    throw new Error(`Class '${className}' is not registered in classMap`);
+  }
+
+  const instance = new ClassConstructor(...args);
+  const objectId = nextObjectId++;
+  objectMap[objectId] = instance;
+
+  const isEventTarget = instance instanceof EventTarget;
+  const extensions = (ClassConstructor as any)[EXTENSION_METADATA] as ExtensionMetadata | undefined;
+
+  return { objectId, instance, isEventTarget, extensions };
+}
+
+/**
+ * Creates a new owned (non-singleton) object instance and manages it.
+ * The requesting WebContents becomes the lifecycle owner.
  */
 function handleObjectCreation(
   sender: WebContents,
   className: string,
   args: unknown[]
 ): { objectId: number; isEventTarget: boolean; extensions?: ExtensionMetadata } {
-  const ClassConstructor = (registeredClassMap as Record<string, new (...args: any[]) => any>)[className];
-  if (!ClassConstructor) {
-    throw new Error(`Class '${className}' is not registered in classMap`);
-  }
+  const { objectId, instance, isEventTarget, extensions } = instantiateRegisteredClass(className, args);
 
-  // Create object instance
-  const instance = new ClassConstructor(...args);
-  const objectId = nextObjectId++;
-
-  // Create and attach metadata. Initial senders Set contains only the requesting WebContents.
-  const metadata: ObjectMetadataMain = { objectId, senders: new Set([sender]) };
+  const metadata: OwnedObjectMetadataMain = { objectId, owner: sender };
   (instance as any)[OBJECT_METADATA_SYMBOL] = metadata;
 
-  // Store in object map
-  objectMap[objectId] = instance;
-
-  // Check if object is EventTarget and override dispatchEvent if needed
-  const isEventTarget = instance instanceof EventTarget;
   if (isEventTarget) {
     overrideDispatchEvent(instance as EventTarget);
   }
-
-  // Read extension metadata from class static property
-  const extensions = (ClassConstructor as any)[EXTENSION_METADATA] as ExtensionMetadata | undefined;
 
   return { objectId, isEventTarget, extensions };
 }
 
 /**
  * Gets or creates a singleton object instance.
- * If a singleton for the given class already exists, returns its object ID.
- * Otherwise, creates a new instance and registers it as a singleton.
+ * If a singleton for the given class already exists, the calling sender is added to
+ * its subscribers and the existing object id is returned.
+ * Otherwise, a new instance is created with singleton metadata and registered.
  */
 function handleGetSingleton(
   sender: WebContents,
   className: string,
   args: unknown[]
 ): { objectId: number; isEventTarget: boolean; extensions?: ExtensionMetadata } {
-  // Check if singleton already exists
   const existingObjectId = singletonMap[className];
   if (existingObjectId !== undefined) {
     const instance = objectMap[existingObjectId];
     if (instance) {
-      const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain;
+      const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as SingletonObjectMetadataMain;
       // Subscribe this sender to broadcasts (no-op if already subscribed).
-      metadata.senders.add(sender);
+      metadata.subscribers.add(sender);
 
       const isEventTarget = instance instanceof EventTarget;
-
-      // Read extension metadata from class
       const ClassConstructor = (registeredClassMap as Record<string, any>)[className];
       const extensions = (ClassConstructor as any)?.[EXTENSION_METADATA] as ExtensionMetadata | undefined;
 
@@ -184,13 +209,19 @@ function handleGetSingleton(
     }
   }
 
-  // Singleton doesn't exist, create new instance
-  const result = handleObjectCreation(sender, className, args);
+  // Singleton doesn't exist: create a fresh instance with singleton metadata.
+  const { objectId, instance, isEventTarget, extensions } = instantiateRegisteredClass(className, args);
 
-  // Register as singleton
-  singletonMap[className] = result.objectId;
+  const metadata: SingletonObjectMetadataMain = { objectId, subscribers: new Set([sender]) };
+  (instance as any)[OBJECT_METADATA_SYMBOL] = metadata;
 
-  return result;
+  if (isEventTarget) {
+    overrideDispatchEvent(instance as EventTarget);
+  }
+
+  singletonMap[className] = objectId;
+
+  return { objectId, isEventTarget, extensions };
 }
 
 /**
@@ -252,13 +283,12 @@ function handleObjectRelease(objectIds: number[]): void {
 
 /**
  * Cleans up references to a destroyed WebContents.
- * - Non-singleton objects whose owner matches `wc` are released.
- * - Singleton objects keep living, but `wc` is removed from their senders set so
- *   future dispatches do not target the dead WebContents.
+ * - Owned (non-singleton) objects whose owner matches `wc` are released.
+ * - Singleton objects keep living, but `wc` is removed from their subscribers set
+ *   so future dispatches do not target the dead WebContents.
  * Invoked when a WebContents is destroyed (e.g., window closed).
  */
 function releaseObjectsForWebContents(wc: WebContents): void {
-  const singletonIds = new Set(Object.values(singletonMap));
   for (const key of Object.keys(objectMap)) {
     const objectId = Number(key);
     const instance = objectMap[objectId];
@@ -266,11 +296,9 @@ function releaseObjectsForWebContents(wc: WebContents): void {
     if (!metadata) {
       continue;
     }
-    if (singletonIds.has(objectId)) {
-      metadata.senders.delete(wc);
-      continue;
-    }
-    if (metadata.senders.has(wc)) {
+    if ('subscribers' in metadata) {
+      metadata.subscribers.delete(wc);
+    } else if (metadata.owner === wc) {
       delete objectMap[objectId];
     }
   }
@@ -286,8 +314,13 @@ function watchWebContents(wc: WebContents): void {
 }
 
 /**
- * Overrides the dispatchEvent method of an EventTarget to broadcast events to all
- * subscribed renderer WebContents.
+ * Overrides the dispatchEvent method of an EventTarget to forward events to renderer
+ * WebContents.
+ *
+ * - For owned (non-singleton) objects, the single owner is the recipient.
+ * - For singletons, every subscriber receives the event (broadcast). The subscribers
+ *   set may be empty (singleton created via main proxy with no renderer attached yet);
+ *   the loop simply no-ops in that case and may receive subscribers later.
  */
 function overrideDispatchEvent(eventTarget: EventTarget): void {
   const metadata = (eventTarget as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain;
@@ -295,16 +328,16 @@ function overrideDispatchEvent(eventTarget: EventTarget): void {
   const originalDispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
 
   eventTarget.dispatchEvent = function (event: Event): boolean {
-    // Call original dispatchEvent first
     const result = originalDispatchEvent(event);
 
-    // Broadcast to every currently-subscribed WebContents.
-    // Senders may be empty (singleton created via main proxy with no renderer attached yet);
-    // the loop simply no-ops in that case and may receive subscribers later.
-    for (const sender of metadata.senders) {
+    const recipients: Iterable<WebContents> = 'subscribers' in metadata
+      ? metadata.subscribers
+      : [metadata.owner];
+
+    for (const wc of recipients) {
       try {
-        if (!sender.isDestroyed()) {
-          sender.send(IPC_CHANNEL, {
+        if (!wc.isDestroyed()) {
+          wc.send(IPC_CHANNEL, {
             type: 'event',
             objectId: metadata.objectId,
             eventType: event.type,
@@ -352,25 +385,19 @@ export const singleton: SingletonObject = new Proxy({} as SingletonObject, {
         }
       }
 
-      // Create new singleton with empty args
-      const ClassConstructor = (registeredClassMap as Record<string, new (...args: any[]) => any>)[classNameStr];
-      if (!ClassConstructor) {
-        throw new Error(`Class '${classNameStr}' is not registered in classMap`);
-      }
+      // Create new singleton with empty args.
+      // instantiateRegisteredClass throws if classNameStr is not registered.
+      const { objectId, instance, isEventTarget } = instantiateRegisteredClass(classNameStr, []);
 
-      const instance = new ClassConstructor();
-      const objectId = nextObjectId++;
-
-      // Initialize metadata with an empty senders Set: no renderer has subscribed yet,
+      // Initialize metadata with an empty subscribers Set: no renderer has subscribed yet,
       // and renderers will be appended as they call getSingleton.
-      const metadata: ObjectMetadataMain = { objectId, senders: new Set() };
+      const metadata: SingletonObjectMetadataMain = { objectId, subscribers: new Set() };
       (instance as any)[OBJECT_METADATA_SYMBOL] = metadata;
 
-      objectMap[objectId] = instance;
       singletonMap[classNameStr] = objectId;
 
       // Override dispatchEvent up front so future subscribers receive events.
-      if (instance instanceof EventTarget) {
+      if (isEventTarget) {
         overrideDispatchEvent(instance as EventTarget);
       }
 
@@ -397,7 +424,7 @@ export const __testing__ = {
    * Returns the number of WebContents subscribed to a singleton's events,
    * or 0 if the singleton does not exist.
    */
-  getSingletonSenderCount(className: string): number {
+  getSingletonSubscriberCount(className: string): number {
     const objectId = singletonMap[className];
     if (objectId === undefined) {
       return 0;
@@ -407,7 +434,10 @@ export const __testing__ = {
       return 0;
     }
     const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain | undefined;
-    return metadata?.senders.size ?? 0;
+    if (!metadata || !('subscribers' in metadata)) {
+      return 0;
+    }
+    return metadata.subscribers.size;
   },
 };
 
