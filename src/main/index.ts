@@ -25,8 +25,12 @@ export interface InitObjProxyOptions {
 interface ObjectMetadataMain {
   /** Unique identifier for the object */
   objectId: number;
-  /** WebContents that requested the object creation, used for event forwarding */
-  sender: WebContents;
+  /**
+   * Set of WebContents to forward events to.
+   * For non-singleton objects this contains exactly one entry (the creator and lifecycle owner).
+   * For singleton objects this accumulates every WebContents that has obtained the singleton.
+   */
+  senders: Set<WebContents>;
 }
 
 /**
@@ -132,8 +136,8 @@ function handleObjectCreation(
   const instance = new ClassConstructor(...args);
   const objectId = nextObjectId++;
 
-  // Create and attach metadata
-  const metadata: ObjectMetadataMain = { objectId, sender };
+  // Create and attach metadata. Initial senders Set contains only the requesting WebContents.
+  const metadata: ObjectMetadataMain = { objectId, senders: new Set([sender]) };
   (instance as any)[OBJECT_METADATA_SYMBOL] = metadata;
 
   // Store in object map
@@ -166,18 +170,9 @@ function handleGetSingleton(
   if (existingObjectId !== undefined) {
     const instance = objectMap[existingObjectId];
     if (instance) {
-      const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain | undefined;
-
-      // If metadata doesn't exist, create it (case: created via singleton proxy)
-      if (!metadata) {
-        const newMetadata: ObjectMetadataMain = { objectId: existingObjectId, sender };
-        (instance as any)[OBJECT_METADATA_SYMBOL] = newMetadata;
-
-        // If EventTarget, override dispatchEvent now
-        if (instance instanceof EventTarget) {
-          overrideDispatchEvent(instance as EventTarget);
-        }
-      }
+      const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain;
+      // Subscribe this sender to broadcasts (no-op if already subscribed).
+      metadata.senders.add(sender);
 
       const isEventTarget = instance instanceof EventTarget;
 
@@ -256,19 +251,26 @@ function handleObjectRelease(objectIds: number[]): void {
 }
 
 /**
- * Releases all non-singleton objects whose sender matches the given WebContents.
+ * Cleans up references to a destroyed WebContents.
+ * - Non-singleton objects whose owner matches `wc` are released.
+ * - Singleton objects keep living, but `wc` is removed from their senders set so
+ *   future dispatches do not target the dead WebContents.
  * Invoked when a WebContents is destroyed (e.g., window closed).
  */
 function releaseObjectsForWebContents(wc: WebContents): void {
   const singletonIds = new Set(Object.values(singletonMap));
   for (const key of Object.keys(objectMap)) {
     const objectId = Number(key);
-    if (singletonIds.has(objectId)) {
-      continue;
-    }
     const instance = objectMap[objectId];
     const metadata = (instance as any)?.[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain | undefined;
-    if (metadata && metadata.sender === wc) {
+    if (!metadata) {
+      continue;
+    }
+    if (singletonIds.has(objectId)) {
+      metadata.senders.delete(wc);
+      continue;
+    }
+    if (metadata.senders.has(wc)) {
       delete objectMap[objectId];
     }
   }
@@ -284,13 +286,11 @@ function watchWebContents(wc: WebContents): void {
 }
 
 /**
- * Overrides the dispatchEvent method of an EventTarget to forward events to renderer.
+ * Overrides the dispatchEvent method of an EventTarget to broadcast events to all
+ * subscribed renderer WebContents.
  */
 function overrideDispatchEvent(eventTarget: EventTarget): void {
   const metadata = (eventTarget as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain;
-  if (!metadata) {
-    return;
-  }
 
   const originalDispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
 
@@ -298,18 +298,22 @@ function overrideDispatchEvent(eventTarget: EventTarget): void {
     // Call original dispatchEvent first
     const result = originalDispatchEvent(event);
 
-    // Forward event to renderer process
-    try {
-      if (!metadata.sender.isDestroyed()) {
-        metadata.sender.send(IPC_CHANNEL, {
-          type: 'event',
-          objectId: metadata.objectId,
-          eventType: event.type,
-          detail: (event as any).detail,
-        });
+    // Broadcast to every currently-subscribed WebContents.
+    // Senders may be empty (singleton created via main proxy with no renderer attached yet);
+    // the loop simply no-ops in that case and may receive subscribers later.
+    for (const sender of metadata.senders) {
+      try {
+        if (!sender.isDestroyed()) {
+          sender.send(IPC_CHANNEL, {
+            type: 'event',
+            objectId: metadata.objectId,
+            eventType: event.type,
+            detail: (event as any).detail,
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to forward event to renderer:', error);
       }
-    } catch (error) {
-      console.warn('Failed to forward event to renderer:', error);
     }
 
     return result;
@@ -357,11 +361,18 @@ export const singleton: SingletonObject = new Proxy({} as SingletonObject, {
       const instance = new ClassConstructor();
       const objectId = nextObjectId++;
 
-      // Store and register as singleton (metadata will be added later when accessed from renderer)
+      // Initialize metadata with an empty senders Set: no renderer has subscribed yet,
+      // and renderers will be appended as they call getSingleton.
+      const metadata: ObjectMetadataMain = { objectId, senders: new Set() };
+      (instance as any)[OBJECT_METADATA_SYMBOL] = metadata;
+
       objectMap[objectId] = instance;
       singletonMap[classNameStr] = objectId;
 
-      // Note: metadata and EventTarget override will be set when first accessed from renderer
+      // Override dispatchEvent up front so future subscribers receive events.
+      if (instance instanceof EventTarget) {
+        overrideDispatchEvent(instance as EventTarget);
+      }
 
       return instance;
     }
@@ -381,6 +392,22 @@ export const __testing__ = {
   /** Returns the list of object IDs registered as singletons. */
   getSingletonObjectIds(): number[] {
     return Object.values(singletonMap);
+  },
+  /**
+   * Returns the number of WebContents subscribed to a singleton's events,
+   * or 0 if the singleton does not exist.
+   */
+  getSingletonSenderCount(className: string): number {
+    const objectId = singletonMap[className];
+    if (objectId === undefined) {
+      return 0;
+    }
+    const instance = objectMap[objectId];
+    if (!instance) {
+      return 0;
+    }
+    const metadata = (instance as any)[OBJECT_METADATA_SYMBOL] as ObjectMetadataMain | undefined;
+    return metadata?.senders.size ?? 0;
   },
 };
 

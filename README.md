@@ -81,6 +81,11 @@ const config = singleton.Config;
 // Note: Constructor arguments are only used on first creation
 ```
 
+When a singleton extends `EventTarget`, events dispatched in the main process are
+broadcast to **every** renderer process that has obtained the singleton. The same
+singleton instance can therefore be used as an app-wide event hub across multiple
+windows; closing one window does not stop event delivery to the remaining ones.
+
 ### 4. Using Singletons in Main Process
 
 You can also access singletons directly in the main process:
@@ -176,6 +181,7 @@ const status = await service.getStatus();
 - No property access: Only method calls are supported; property get/set operations require IPC calls which aren't implemented
 - EventTarget events only: Event forwarding is only available for objects extending `EventTarget`
 - Singleton lifecycle: Singleton objects are never released once created until the application exits
+- Singleton event broadcast cost: Events dispatched on a singleton are sent to every subscribed window via IPC; the cost scales linearly with the number of subscribed windows
 - Context isolation required: Only works with `contextIsolation: true` in Electron's webPreferences
 - MessagePort transfer: Only supports renderer → main direction; methods declared for MessagePort are fire-and-forget (no return value)
 
