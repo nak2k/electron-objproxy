@@ -1,4 +1,5 @@
 import { app, ipcMain, webContents, type WebContents } from 'electron';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -7,6 +8,26 @@ import { IPC_CHANNEL, EXTENSION_METADATA } from '../common/constants.js';
 
 export { EXTENSION_METADATA } from '../common/constants.js';
 export type { ExtensionMetadata, TransferablePort } from '../common/types.js';
+
+/**
+ * AsyncLocalStorage used to expose the calling WebContents to method bodies
+ * of classes that opt in via `ExtensionMetadata.needsCaller`.
+ */
+const callerStore = new AsyncLocalStorage<WebContents>();
+
+/**
+ * Returns the WebContents that initiated the currently executing proxied method
+ * call, or `undefined` if not inside such a call (e.g., when the method was
+ * invoked directly from the main process via `singleton`).
+ *
+ * Only available inside methods of classes whose static
+ * `[EXTENSION_METADATA]` declares `needsCaller: true`. Otherwise always returns
+ * `undefined`, even during an IPC-originated call, because the context is not
+ * set up for classes that did not opt in.
+ */
+export function getCurrentCaller(): WebContents | undefined {
+  return callerStore.getStore();
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -97,7 +118,7 @@ async function handleInvokeRequest(
 
     case 'call': {
       const { objectId, method, args } = payload;
-      return handleMethodCall(objectId, method, args);
+      return handleMethodCall(event.sender, objectId, method, args);
     }
 
     default:
@@ -128,7 +149,7 @@ function handleSendRequest(
 
     case 'callWithPort': {
       const { objectId, method, args } = message;
-      handleMethodCallWithPort(objectId, method, args, event.ports);
+      handleMethodCallWithPort(event.sender, objectId, method, args, event.ports);
       break;
     }
 
@@ -225,9 +246,21 @@ function handleGetSingleton(
 }
 
 /**
+ * Returns true if the instance's class opts into caller-context injection
+ * via `[EXTENSION_METADATA].needsCaller`.
+ */
+function needsCallerContext(instance: object): boolean {
+  const ctor = (instance as { constructor?: unknown }).constructor as
+    | { [EXTENSION_METADATA]?: ExtensionMetadata }
+    | undefined;
+  return ctor?.[EXTENSION_METADATA]?.needsCaller === true;
+}
+
+/**
  * Handles method calls on managed objects.
  */
 async function handleMethodCall(
+  sender: WebContents,
   objectId: number,
   method: string,
   args: unknown[]
@@ -242,7 +275,10 @@ async function handleMethodCall(
     throw new Error(`Method '${method}' not found on object with ID ${objectId}`);
   }
 
-  // Call the method and return the result
+  if (needsCallerContext(instance)) {
+    return callerStore.run(sender, () => methodFn.apply(instance, args));
+  }
+
   return methodFn.apply(instance, args);
 }
 
@@ -251,6 +287,7 @@ async function handleMethodCall(
  * Ports are passed as the last argument to the method as MessagePortMain[].
  */
 function handleMethodCallWithPort(
+  sender: WebContents,
   objectId: number,
   method: string,
   args: unknown[],
@@ -265,6 +302,11 @@ function handleMethodCallWithPort(
   const methodFn = (instance as any)[method];
   if (typeof methodFn !== 'function') {
     console.warn(`Method '${method}' not found on object with ID ${objectId}`);
+    return;
+  }
+
+  if (needsCallerContext(instance)) {
+    callerStore.run(sender, () => methodFn.apply(instance, [...args, ports]));
     return;
   }
 

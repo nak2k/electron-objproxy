@@ -149,6 +149,12 @@ export interface GetSingletonSyncResponse {
 export interface ExtensionMetadata {
   /** MessagePort transfer support configuration */
   messagePort?: MessagePortExtension;
+  /**
+   * When true, method calls on instances of this class are wrapped in an
+   * AsyncLocalStorage context so that `getCurrentCaller()` (main entry) returns
+   * the calling WebContents while the method is executing.
+   */
+  needsCaller?: boolean;
 }
 
 /**

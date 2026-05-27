@@ -115,7 +115,47 @@ myObject.addEventListener('custom-event', (event) => {
 });
 ```
 
-### 6. MessagePort Transfer
+### 6. Identifying the Calling Window
+
+If a method in the main process needs to know **which renderer (BrowserWindow / WebContents) invoked it**, opt the class into caller-context injection via `needsCaller: true` in extension metadata, then call `getCurrentCaller()` inside the method body.
+
+**Main process class definition:**
+
+```typescript
+import { BrowserWindow } from 'electron';
+import { EXTENSION_METADATA, getCurrentCaller, type ExtensionMetadata } from 'electron-objproxy/main';
+
+class WindowAwareService {
+  static [EXTENSION_METADATA]: ExtensionMetadata = {
+    needsCaller: true,
+  };
+
+  async whoCalledMe(): Promise<number | null> {
+    const caller = getCurrentCaller();
+    if (!caller) {
+      // Called directly from main process (e.g., via `singleton.WindowAwareService`),
+      // not via IPC from a renderer.
+      return null;
+    }
+    return BrowserWindow.fromWebContents(caller)?.id ?? null;
+  }
+}
+```
+
+**Renderer usage** is unchanged — the renderer just calls the method normally:
+
+```typescript
+const service = await getSingleton('WindowAwareService');
+const myWindowId = await service.whoCalledMe();
+```
+
+Notes:
+
+- `getCurrentCaller()` returns `undefined` outside of an IPC-originated call, **including for classes that did not opt in**. This is a fast-fail: if you forget `needsCaller: true`, the function simply returns `undefined` rather than throwing.
+- The caller context is preserved across `await` boundaries inside the method (it is implemented with `AsyncLocalStorage`).
+- Only classes that declare `needsCaller: true` pay the (small) wrapping cost — other classes are unaffected.
+
+### 7. MessagePort Transfer
 
 You can transfer `MessagePort` instances from the renderer to the main process for direct communication channels. Methods that accept MessagePort transfers are declared via extension metadata and operate as fire-and-forget (no return value).
 
